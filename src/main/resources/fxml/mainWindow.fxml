@@ -10,6 +10,9 @@
                 <Label text="Protocol Filter:" style="-fx-font-size: 12;"/>
                 <ComboBox fx:id="protocolFilterCombo" prefWidth="120"/>
                 <Button fx:id="refreshButton" text="Refresh" style="-fx-padding: 5 15;"/>
+                <Separator orientation="VERTICAL"/>
+                <Button fx:id="exportCSVButton" text="Export to CSV" style="-fx-padding: 5 15;"/>
+                <Button fx:id="exportJSONButton" text="Export to JSON" style="-fx-padding: 5 15;"/>
                 <Region HBox.hgrow="ALWAYS"/>
                 <ProgressIndicator fx:id="loadingIndicator" maxWidth="30" maxHeight="30" visible="false"/>
             </HBox>
