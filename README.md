@@ -48,6 +48,13 @@ java -jar target/dumpports-{version}.jar
 2. Click the **Refresh** button to load current socket statistics
 3. The table will display all network sockets with detailed information
 
+### Real-time Auto Refresh
+
+1. Toggle **Auto Refresh** to enable periodic updates
+2. Set the **Interval (s)** spinner to your preferred cadence (2–300 seconds)
+3. The app refreshes in the background without blocking the UI
+4. Current protocol filter is preserved across refreshes
+
 ### Filtering by Protocol
 
 1. Use the **Protocol Filter** dropdown menu at the top

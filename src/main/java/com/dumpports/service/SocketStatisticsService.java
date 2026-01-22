@@ -218,7 +218,7 @@ public class SocketStatisticsService {
                 }
             }
         } catch (Exception e) {
-            logger.debug("Error parsing process info: {}", processField, e);
+            logger.trace("Error parsing process info: {}", processField, e);
         }
     }
 
@@ -240,7 +240,7 @@ public class SocketStatisticsService {
                 return realPath.toAbsolutePath().toString();
             }
         } catch (Exception e) {
-            logger.debug("Could not read executable path for PID {}: {}", pid, e.getMessage());
+            logger.trace("Could not read executable path for PID {}: {}", pid, e.getMessage());
         }
 
         return null;

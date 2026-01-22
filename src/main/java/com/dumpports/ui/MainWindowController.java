@@ -5,6 +5,11 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.ResourceBundle;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,9 +25,12 @@ import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressIndicator;
+import javafx.scene.control.Spinner;
+import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.PropertyValueFactory;
@@ -58,6 +66,10 @@ public class MainWindowController implements Initializable {
     @FXML
     private Button refreshButton;
     @FXML
+    private CheckBox autoRefreshCheck;
+    @FXML
+    private Spinner<Integer> refreshIntervalSpinner;
+    @FXML
     private Button exportCSVButton;
     @FXML
     private Button exportJSONButton;
@@ -70,6 +82,10 @@ public class MainWindowController implements Initializable {
     private final ExportService exportService = new ExportService();
     private ObservableList<Socket> socketsList = FXCollections.observableArrayList();
     private ObservableList<Socket> allSocketsData = FXCollections.observableArrayList();
+    private final AtomicBoolean isRefreshing = new AtomicBoolean(false);
+    private ScheduledExecutorService scheduler;
+    private ScheduledFuture<?> refreshTask;
+    private int refreshIntervalSeconds = 10;
 
     @Override
     public void initialize(URL url, ResourceBundle resourceBundle) {
@@ -79,7 +95,68 @@ public class MainWindowController implements Initializable {
         setupProtocolFilter();
         setupRefreshButton();
         setupExportButtons();
+        setupAutoRefreshControls();
         loadSocketData();
+    }
+
+    private void setupAutoRefreshControls() {
+        // Spinner defaults and bounds: 2..300 seconds
+        SpinnerValueFactory<Integer> valueFactory = new SpinnerValueFactory.IntegerSpinnerValueFactory(2, 300, refreshIntervalSeconds);
+        refreshIntervalSpinner.setValueFactory(valueFactory);
+        refreshIntervalSpinner.valueProperty().addListener((obs, oldVal, newVal) -> {
+            refreshIntervalSeconds = newVal;
+            if (autoRefreshCheck.isSelected()) {
+                restartAutoRefresh();
+            }
+        });
+
+        autoRefreshCheck.setOnAction(event -> {
+            if (autoRefreshCheck.isSelected()) {
+                startAutoRefresh();
+            } else {
+                stopAutoRefresh();
+            }
+        });
+    }
+
+    private void startAutoRefresh() {
+        if (scheduler == null || scheduler.isShutdown()) {
+            scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "auto-refresh-thread");
+                t.setDaemon(true);
+                return t;
+            });
+        }
+        scheduleRefreshTask();
+        statusLabel.setText("Auto refresh ON (" + refreshIntervalSeconds + "s)");
+        logger.debug("Auto refresh started with interval {}s", refreshIntervalSeconds);
+    }
+
+    private void scheduleRefreshTask() {
+        if (refreshTask != null && !refreshTask.isCancelled()) {
+            refreshTask.cancel(false);
+        }
+        refreshTask = scheduler.scheduleAtFixedRate(() -> {
+            // trigger data load; it already ensures thread safety
+            loadSocketData();
+        }, refreshIntervalSeconds, refreshIntervalSeconds, TimeUnit.SECONDS);
+    }
+
+    private void restartAutoRefresh() {
+        stopAutoRefresh();
+        startAutoRefresh();
+    }
+
+    private void stopAutoRefresh() {
+        if (refreshTask != null) {
+            refreshTask.cancel(false);
+            refreshTask = null;
+        }
+        if (scheduler != null && !scheduler.isShutdown()) {
+            scheduler.shutdownNow();
+        }
+        statusLabel.setText("Auto refresh OFF");
+        logger.debug("Auto refresh stopped");
     }
 
     private void setupTableColumns() {
@@ -123,6 +200,11 @@ public class MainWindowController implements Initializable {
 
     @FXML
     private void loadSocketData() {
+        if (!isRefreshing.compareAndSet(false, true)) {
+            // A refresh is already running; skip starting another
+            return;
+        }
+
         loadingIndicator.setVisible(true);
         statusLabel.setText("Loading socket statistics...");
 
@@ -145,7 +227,8 @@ public class MainWindowController implements Initializable {
                     }
                     
                     loadingIndicator.setVisible(false);
-                    logger.info("Socket data loaded successfully");
+                    logger.debug("Socket data loaded successfully");
+                    isRefreshing.set(false);
                 });
             } catch (Exception e) {
                 logger.error("Error loading socket data", e);
@@ -153,6 +236,7 @@ public class MainWindowController implements Initializable {
                     statusLabel.setText("Error loading socket data");
                     loadingIndicator.setVisible(false);
                     showErrorAlert("Error", "Failed to load socket statistics", e.getMessage());
+                    isRefreshing.set(false);
                 });
             }
         });

@@ -10,6 +10,11 @@
                 <Label text="Protocol Filter:" style="-fx-font-size: 12;"/>
                 <ComboBox fx:id="protocolFilterCombo" prefWidth="120"/>
                 <Button fx:id="refreshButton" text="Refresh" style="-fx-padding: 5 15;"/>
+                <CheckBox fx:id="autoRefreshCheck" text="Auto Refresh" selected="false"/>
+                <HBox spacing="5" alignment="CENTER_LEFT">
+                    <Label text="Interval (s):"/>
+                    <Spinner fx:id="refreshIntervalSpinner" editable="true"/>
+                </HBox>
                 <Separator orientation="VERTICAL"/>
                 <Button fx:id="exportCSVButton" text="Export to CSV" style="-fx-padding: 5 15;"/>
                 <Button fx:id="exportJSONButton" text="Export to JSON" style="-fx-padding: 5 15;"/>
