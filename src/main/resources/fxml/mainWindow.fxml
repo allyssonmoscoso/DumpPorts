@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<BorderPane xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.dumpports.ui.MainWindowController">
+    <top>
+        <VBox spacing="10" style="-fx-padding: 10;">
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Protocol Filter:" style="-fx-font-size: 12;"/>
+                <ComboBox fx:id="protocolFilterCombo" prefWidth="120"/>
+                <Button fx:id="refreshButton" text="Refresh" style="-fx-padding: 5 15;"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <ProgressIndicator fx:id="loadingIndicator" maxWidth="30" maxHeight="30" visible="false"/>
+            </HBox>
+            <Label fx:id="statusLabel" text="Ready" style="-fx-text-fill: #666666; -fx-font-size: 11;"/>
+        </VBox>
+    </top>
+    
+    <center>
+        <TableView fx:id="socketsTable" editable="false">
+            <columns>
+                <TableColumn fx:id="protocolColumn" text="Protocol" prefWidth="70"/>
+                <TableColumn fx:id="stateColumn" text="State" prefWidth="100"/>
+                <TableColumn fx:id="localAddressColumn" text="Local Address" prefWidth="150"/>
+                <TableColumn fx:id="localPortColumn" text="Local Port" prefWidth="80"/>
+                <TableColumn fx:id="remoteAddressColumn" text="Remote Address" prefWidth="150"/>
+                <TableColumn fx:id="remotePortColumn" text="Remote Port" prefWidth="80"/>
+                <TableColumn fx:id="processColumn" text="Process" prefWidth="200"/>
+            </columns>
+            <columnResizePolicy>
+                <TableView fx:constant="CONSTRAINED_RESIZE_POLICY"/>
+            </columnResizePolicy>
+        </TableView>
+    </center>
+    
+    <bottom>
+        <HBox spacing="10" style="-fx-padding: 10; -fx-border-color: #cccccc; -fx-border-width: 1 0 0 0;">
+            <Label text="DumpPorts v1.0.0 - Socket Statistics Visualizer" style="-fx-text-fill: #666666; -fx-font-size: 10;"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <Label fx:id="socketCountLabel" text="Sockets: 0" style="-fx-text-fill: #666666; -fx-font-size: 10;"/>
+        </HBox>
+    </bottom>
+</BorderPane>
