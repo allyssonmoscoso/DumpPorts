@@ -603,6 +603,9 @@ FodyWeavers.xsd
 #github copilot
 .github/*
 
+#target files
+target/*
+
 ### VisualStudio Patch ###
 # Additional files built by Visual Studio
 
