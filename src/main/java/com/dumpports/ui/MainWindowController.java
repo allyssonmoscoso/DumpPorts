@@ -89,7 +89,16 @@ public class MainWindowController implements Initializable {
         localPortColumn.setCellValueFactory(new PropertyValueFactory<>("localPort"));
         remoteAddressColumn.setCellValueFactory(new PropertyValueFactory<>("remoteAddress"));
         remotePortColumn.setCellValueFactory(new PropertyValueFactory<>("remotePort"));
-        processColumn.setCellValueFactory(new PropertyValueFactory<>("process"));
+        
+        // Use executable path if available, otherwise fall back to process name
+        processColumn.setCellValueFactory(cellData -> {
+            Socket socket = cellData.getValue();
+            String display = socket.getExecutablePath();
+            if (display == null || display.isEmpty()) {
+                display = socket.getProcess();
+            }
+            return new javafx.beans.property.SimpleStringProperty(display);
+        });
 
         socketsTable.setItems(socketsList);
     }

@@ -7,6 +7,7 @@ A "modern", visual tool to read and display network socket statistics using sock
 - Real-time socket statistics visualization
 - Filter sockets by protocol (TCP, UDP, RAW, SCTP)
 - Detailed socket information display (addresses, ports, process names)
+- Shows complete binary paths
 - Automatic data refresh capability
 - Export functionality (CSV and JSON formats)
 - Clean and intuitive user interface
