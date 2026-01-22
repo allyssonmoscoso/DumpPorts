@@ -17,6 +17,7 @@ public class Socket {
     private String remotePort;
     private String pid;
     private String process;
+    private String executablePath;
 
     public Socket() {
     }
@@ -120,6 +121,14 @@ public class Socket {
         this.process = process;
     }
 
+    public String getExecutablePath() {
+        return executablePath;
+    }
+
+    public void setExecutablePath(String executablePath) {
+        this.executablePath = executablePath;
+    }
+
     @Override
     public String toString() {
         return "Socket{" +
@@ -130,6 +139,7 @@ public class Socket {
                 ", remoteAddress='" + remoteAddress + '\'' +
                 ", remotePort='" + remotePort + '\'' +
                 ", process='" + process + '\'' +
+                ", executablePath='" + executablePath + '\'' +
                 '}';
     }
 }

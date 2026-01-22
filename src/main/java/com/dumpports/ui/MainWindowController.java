@@ -1,6 +1,8 @@
 package com.dumpports.ui;
 
+import java.io.File;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.ResourceBundle;
 
@@ -8,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.dumpports.model.Socket;
+import com.dumpports.service.ExportService;
 import com.dumpports.service.SocketStatisticsService;
 
 import javafx.application.Platform;
@@ -23,6 +26,8 @@ import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.stage.FileChooser;
+import javafx.stage.Window;
 
 /**
  * Controller for the main window of the DumpPorts application.
@@ -53,12 +58,18 @@ public class MainWindowController implements Initializable {
     @FXML
     private Button refreshButton;
     @FXML
+    private Button exportCSVButton;
+    @FXML
+    private Button exportJSONButton;
+    @FXML
     private Label statusLabel;
     @FXML
     private ProgressIndicator loadingIndicator;
 
     private final SocketStatisticsService socketService = new SocketStatisticsService();
+    private final ExportService exportService = new ExportService();
     private ObservableList<Socket> socketsList = FXCollections.observableArrayList();
+    private ObservableList<Socket> allSocketsData = FXCollections.observableArrayList();
 
     @Override
     public void initialize(URL url, ResourceBundle resourceBundle) {
@@ -67,6 +78,7 @@ public class MainWindowController implements Initializable {
         setupTableColumns();
         setupProtocolFilter();
         setupRefreshButton();
+        setupExportButtons();
         loadSocketData();
     }
 
@@ -77,7 +89,16 @@ public class MainWindowController implements Initializable {
         localPortColumn.setCellValueFactory(new PropertyValueFactory<>("localPort"));
         remoteAddressColumn.setCellValueFactory(new PropertyValueFactory<>("remoteAddress"));
         remotePortColumn.setCellValueFactory(new PropertyValueFactory<>("remotePort"));
-        processColumn.setCellValueFactory(new PropertyValueFactory<>("process"));
+        
+        // Use executable path if available, otherwise fall back to process name
+        processColumn.setCellValueFactory(cellData -> {
+            Socket socket = cellData.getValue();
+            String display = socket.getExecutablePath();
+            if (display == null || display.isEmpty()) {
+                display = socket.getProcess();
+            }
+            return new javafx.beans.property.SimpleStringProperty(display);
+        });
 
         socketsTable.setItems(socketsList);
     }
@@ -95,6 +116,11 @@ public class MainWindowController implements Initializable {
         refreshButton.setOnAction(event -> loadSocketData());
     }
 
+    private void setupExportButtons() {
+        exportCSVButton.setOnAction(event -> exportToCSV());
+        exportJSONButton.setOnAction(event -> exportToJSON());
+    }
+
     @FXML
     private void loadSocketData() {
         loadingIndicator.setVisible(true);
@@ -105,9 +131,19 @@ public class MainWindowController implements Initializable {
                 List<Socket> sockets = socketService.getSocketStatistics();
                 
                 Platform.runLater(() -> {
-                    socketsList.clear();
-                    socketsList.addAll(sockets);
-                    statusLabel.setText("Loaded " + sockets.size() + " sockets");
+                    allSocketsData.clear();
+                    allSocketsData.addAll(sockets);
+                    
+                    String selectedProtocol = protocolFilterCombo.getValue();
+                    if ("All".equals(selectedProtocol) || selectedProtocol == null) {
+                        socketsList.clear();
+                        socketsList.addAll(sockets);
+                        statusLabel.setText("Loaded " + sockets.size() + " sockets");
+                    } else {
+                        // Reapply the current filter after loading new data
+                        filterSockets();
+                    }
+                    
                     loadingIndicator.setVisible(false);
                     logger.info("Socket data loaded successfully");
                 });
@@ -130,15 +166,17 @@ public class MainWindowController implements Initializable {
         String selectedProtocol = protocolFilterCombo.getValue();
         
         if ("All".equals(selectedProtocol)) {
-            loadSocketData();
+            socketsList.clear();
+            socketsList.addAll(allSocketsData);
+            statusLabel.setText("Loaded " + allSocketsData.size() + " sockets");
         } else {
-            List<Socket> filtered = socketService.getSocketsByProtocol(selectedProtocol);
-            Platform.runLater(() -> {
-                socketsList.clear();
-                socketsList.addAll(filtered);
-                statusLabel.setText("Filtered to " + selectedProtocol.toUpperCase() + 
-                        ": " + filtered.size() + " sockets");
-            });
+            List<Socket> filtered = allSocketsData.stream()
+                    .filter(socket -> socket.getProtocol().equalsIgnoreCase(selectedProtocol))
+                    .toList();
+            socketsList.clear();
+            socketsList.addAll(filtered);
+            statusLabel.setText("Filtered to " + selectedProtocol.toUpperCase() + 
+                    ": " + filtered.size() + " sockets");
         }
     }
 
@@ -149,4 +187,91 @@ public class MainWindowController implements Initializable {
         alert.setContentText(content);
         alert.showAndWait();
     }
+
+    @FXML
+    private void exportToCSV() {
+        if (socketsList.isEmpty()) {
+            showWarningAlert("No Data", "No sockets to export", "Please load socket data first.");
+            return;
+        }
+
+        File selectedFile = showFileChooser("CSV Files (*.csv)", "*.csv", "Export Sockets to CSV");
+        if (selectedFile != null) {
+            // Export only the displayed/filtered data from the table
+            exportData(new ArrayList<>(socketsList), selectedFile, "csv");
+        }
+    }
+
+    @FXML
+    private void exportToJSON() {
+        if (socketsList.isEmpty()) {
+            showWarningAlert("No Data", "No sockets to export", "Please load socket data first.");
+            return;
+        }
+
+        File selectedFile = showFileChooser("JSON Files (*.json)", "*.json", "Export Sockets to JSON");
+        if (selectedFile != null) {
+            // Export only the displayed/filtered data from the table
+            exportData(new ArrayList<>(socketsList), selectedFile, "json");
+        }
+    }
+
+    private File showFileChooser(String filterDescription, String filterExtension, String title) {
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle(title);
+        fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(filterDescription, filterExtension));
+        fileChooser.setInitialFileName(exportService.generateDefaultFilename(filterExtension.replace("*.", "")));
+        fileChooser.setInitialDirectory(new File(System.getProperty("user.home")));
+
+        Window window = refreshButton.getScene().getWindow();
+        return fileChooser.showSaveDialog(window);
+    }
+
+    private void exportData(List<Socket> dataToExport, File file, String format) {
+        Thread exportThread = new Thread(() -> {
+            try {
+                if ("csv".equalsIgnoreCase(format)) {
+                    exportService.exportToCSV(dataToExport, file.getAbsolutePath());
+                } else if ("json".equalsIgnoreCase(format)) {
+                    exportService.exportToJSON(dataToExport, file.getAbsolutePath());
+                }
+
+                Platform.runLater(() -> {
+                    statusLabel.setText("Successfully exported " + dataToExport.size() + " sockets to " + 
+                            format.toUpperCase() + ": " + file.getName());
+                    showInfoAlert("Export Successful", "Export completed", 
+                            "Exported " + dataToExport.size() + " sockets to:\n" + file.getAbsolutePath());
+                    logger.info("Export completed successfully to {}", file.getAbsolutePath());
+                });
+            } catch (Exception e) {
+                logger.error("Error exporting data", e);
+                Platform.runLater(() -> {
+                    statusLabel.setText("Export failed");
+                    showErrorAlert("Export Failed", "Error exporting sockets", e.getMessage());
+                });
+            }
+        });
+
+        exportThread.setDaemon(true);
+        exportThread.start();
+    }
+
+
+
+    private void showWarningAlert(String title, String header, String content) {
+        Alert alert = new Alert(Alert.AlertType.WARNING);
+        alert.setTitle(title);
+        alert.setHeaderText(header);
+        alert.setContentText(content);
+        alert.showAndWait();
+    }
+
+    private void showInfoAlert(String title, String header, String content) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle(title);
+        alert.setHeaderText(header);
+        alert.setContentText(content);
+        alert.showAndWait();
+    }
 }
+
