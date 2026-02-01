@@ -42,6 +42,15 @@ import javafx.stage.FileChooser;
 import javafx.stage.Window;
 
 public class MainWindowController implements Initializable {
+                            @FXML private javafx.scene.control.MenuItem exportHistoryMenuItem;
+                            @FXML private javafx.scene.control.MenuItem clearHistoryMenuItem;
+                            @FXML private javafx.scene.control.Label historyWarningLabel;
+                        // Efficient connection history: compositeKey -> bounded deque of history entries
+                        private static final int MAX_HISTORY_PER_SOCKET = 200;
+                        private static final int MAX_TOTAL_HISTORY = 10000;
+                        private final java.util.LinkedHashMap<String, java.util.ArrayDeque<com.dumpports.model.SocketHistoryEntry>> connectionHistory = new java.util.LinkedHashMap<>();
+                        private int totalHistoryEntries = 0;
+                        private boolean historyPrunedWarning = false;
                     @FXML
                     private javafx.scene.control.ToggleButton favoritesToggleButton;
                 // Set of favorite composite keys (persisted)
@@ -133,19 +142,19 @@ public class MainWindowController implements Initializable {
 
     @Override
     public void initialize(URL url, ResourceBundle resourceBundle) {
+        updateHistoryWarningLabel();
         logger.info("Initializing MainWindowController");
-        
         setupTableColumns();
         setupProtocolFilter();
         setupRefreshButton();
         setupExportButtons();
         setupAutoRefreshControls();
         setupAdvancedFilterControls();
-            loadSocketData();
-            setupSearchHighlighting();
+        loadSocketData();
+        setupSearchHighlighting();
         setupFavoriteColumn();
         loadFavoritesFromPrefs();
-
+        // Optionally: loadHistoryFromDisk();
         if (favoritesToggleButton != null) {
             favoritesToggleButton.setSelected(false);
             favoritesToggleButton.selectedProperty().addListener((obs, oldVal, newVal) -> {
@@ -154,6 +163,123 @@ public class MainWindowController implements Initializable {
                 updateFavoritesToggleStyle();
             });
             updateFavoritesToggleStyle();
+        }
+    }
+
+    /**
+     * Export connection history to a JSON file (GZIP compressed).
+     */
+    @FXML
+    private void onExportHistory() {
+        javafx.stage.FileChooser fileChooser = new javafx.stage.FileChooser();
+        fileChooser.setTitle("Export Connection History");
+        fileChooser.getExtensionFilters().add(new javafx.stage.FileChooser.ExtensionFilter("Compressed JSON Files", "*.json.gz"));
+        // Suggest a default filename
+        String defaultName = "connection_history_" + java.time.LocalDateTime.now().toString().replace(":", "-").replace("T", "_") + ".json.gz";
+        fileChooser.setInitialFileName(defaultName);
+        java.io.File file = fileChooser.showSaveDialog(socketsTable.getScene().getWindow());
+        if (file != null) {
+            boolean confirmed = showConfirmationDialog("Export History", "Export all connection history to file?", "This will export all tracked connection events as compressed JSON (.json.gz).");
+            if (confirmed) {
+                // Write JSON to a temp .json file, then compress to .json.gz, then delete temp
+                java.io.File tempJson = null;
+                try {
+                    // 1. Write JSON to temp file
+                    tempJson = java.io.File.createTempFile("connection_history_", ".json");
+                    com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                    try (java.io.OutputStreamWriter writer = new java.io.OutputStreamWriter(new java.io.FileOutputStream(tempJson), java.nio.charset.StandardCharsets.UTF_8)) {
+                        mapper.writeValue(writer, connectionHistory);
+                    }
+                    // 2. Compress temp .json to .json.gz
+                    try (java.io.FileInputStream fis = new java.io.FileInputStream(tempJson);
+                         java.io.FileOutputStream fos = new java.io.FileOutputStream(file);
+                         java.util.zip.GZIPOutputStream gzip = new java.util.zip.GZIPOutputStream(fos)) {
+                        byte[] buffer = new byte[8192];
+                        int len;
+                        while ((len = fis.read(buffer)) > 0) {
+                            gzip.write(buffer, 0, len);
+                        }
+                    }
+                    showInfoAlert("Export Complete", "History exported successfully.", file.getAbsolutePath());
+                } catch (Exception e) {
+                    showErrorAlert("Export Failed", "Could not export history.", e.getMessage());
+                } finally {
+                    if (tempJson != null && tempJson.exists()) tempJson.delete();
+                }
+            }
+        }
+    }
+
+    /**
+     * Clear all connection history after user confirmation.
+     */
+    @FXML
+    private void onClearHistory() {
+        boolean confirmed = showConfirmationDialog("Clear History", "Are you sure you want to clear all connection history?", "This operation cannot be undone.");
+        if (confirmed) {
+            connectionHistory.clear();
+            totalHistoryEntries = 0;
+            historyPrunedWarning = false;
+            updateHistoryWarningLabel();
+            showInfoAlert("History Cleared", "All connection history has been cleared.", null);
+        }
+    }
+
+    /**
+     * Update the warning label if history was pruned.
+     */
+    private void updateHistoryWarningLabel() {
+        if (historyWarningLabel != null) {
+            if (historyPrunedWarning) {
+                historyWarningLabel.setText("Warning: Some connection history was pruned due to storage limits.");
+                historyWarningLabel.setVisible(true);
+            } else {
+                historyWarningLabel.setText("");
+                historyWarningLabel.setVisible(false);
+            }
+        }
+    }
+
+    /**
+     * Show a confirmation dialog and return true if user confirms.
+     */
+    private boolean showConfirmationDialog(String title, String header, String content) {
+        javafx.scene.control.Alert alert = new javafx.scene.control.Alert(javafx.scene.control.Alert.AlertType.CONFIRMATION);
+        alert.setTitle(title);
+        alert.setHeaderText(header);
+        alert.setContentText(content);
+        java.util.Optional<javafx.scene.control.ButtonType> result = alert.showAndWait();
+        return result.isPresent() && result.get() == javafx.scene.control.ButtonType.OK;
+    }
+
+    /**
+     * Record a connection event for a socket, pruning as needed.
+     */
+    private void recordSocketHistory(String compositeKey, com.dumpports.model.SocketHistoryEntry entry) {
+        connectionHistory.putIfAbsent(compositeKey, new java.util.ArrayDeque<>());
+        java.util.ArrayDeque<com.dumpports.model.SocketHistoryEntry> deque = connectionHistory.get(compositeKey);
+        if (deque.size() >= MAX_HISTORY_PER_SOCKET) {
+            deque.pollFirst();
+            totalHistoryEntries--;
+            historyPrunedWarning = true;
+        }
+        deque.addLast(entry);
+        totalHistoryEntries++;
+        // Prune global history if needed
+        while (totalHistoryEntries > MAX_TOTAL_HISTORY) {
+            // Remove oldest entry from the oldest socket
+            String oldestKey = connectionHistory.keySet().iterator().next();
+            java.util.ArrayDeque<com.dumpports.model.SocketHistoryEntry> oldestDeque = connectionHistory.get(oldestKey);
+            if (oldestDeque != null && !oldestDeque.isEmpty()) {
+                oldestDeque.pollFirst();
+                totalHistoryEntries--;
+                historyPrunedWarning = true;
+                if (oldestDeque.isEmpty()) {
+                    connectionHistory.remove(oldestKey);
+                }
+            } else {
+                connectionHistory.remove(oldestKey);
+            }
         }
     }
         @FXML
@@ -447,7 +573,10 @@ public class MainWindowController implements Initializable {
                 Platform.runLater(() -> {
                     allSocketsData.clear();
                     allSocketsData.addAll(sockets);
-                    
+
+                    // Record history transitions before updating the UI
+                    detectSocketStateTransitions(sockets);
+
                     String selectedProtocol = protocolFilterCombo.getValue();
                     if ("All".equals(selectedProtocol) || selectedProtocol == null) {
                         socketsList.clear();
@@ -457,7 +586,7 @@ public class MainWindowController implements Initializable {
                         // Reapply the current filter after loading new data
                         filterSockets();
                     }
-                    
+
                     loadingIndicator.setVisible(false);
                     logger.debug("Socket data loaded successfully");
                     isRefreshing.set(false);
@@ -489,18 +618,34 @@ public class MainWindowController implements Initializable {
             String newState = socket.getState();
             newStates.put(key, newState);
             String oldState = previousSocketStates.get(key);
-            if (oldState != null && !oldState.equals(newState)) {
+            if (oldState == null) {
+                // Socket opened
+                String transition = String.format("Socket [%s] opened: %s", key, newState);
+                transitions.add(transition);
+                logger.info(transition);
+                // Record open event
+                recordSocketHistory(key, new com.dumpports.model.SocketHistoryEntry(
+                        com.dumpports.model.SocketHistoryEntry.EventType.OPENED, newState, socket.toString()));
+            } else if (!oldState.equals(newState)) {
+                // State changed
                 String transition = String.format("Socket [%s] state changed: %s -> %s", key, oldState, newState);
                 transitions.add(transition);
                 logger.info(transition);
+                // Record state change event
+                recordSocketHistory(key, new com.dumpports.model.SocketHistoryEntry(
+                        com.dumpports.model.SocketHistoryEntry.EventType.STATE_CHANGED, newState, socket.toString()));
             }
         }
-        // Optionally, detect closed sockets (present before, missing now)
+        // Detect closed sockets (present before, missing now)
         for (String key : previousSocketStates.keySet()) {
             if (!newStates.containsKey(key)) {
-                String transition = String.format("Socket [%s] closed (was %s)", key, previousSocketStates.get(key));
+                String oldState = previousSocketStates.get(key);
+                String transition = String.format("Socket [%s] closed (was %s)", key, oldState);
                 transitions.add(transition);
                 logger.info(transition);
+                // Record close event
+                recordSocketHistory(key, new com.dumpports.model.SocketHistoryEntry(
+                        com.dumpports.model.SocketHistoryEntry.EventType.CLOSED, oldState, "Socket closed"));
             }
         }
         previousSocketStates.clear();
