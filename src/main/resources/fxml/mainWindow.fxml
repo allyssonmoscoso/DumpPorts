@@ -45,6 +45,7 @@
                 <Separator orientation="VERTICAL"/>
                 <Button fx:id="exportCSVButton" text="Export to CSV" style="-fx-padding: 5 15;"/>
                 <Button fx:id="exportJSONButton" text="Export to JSON" style="-fx-padding: 5 15;"/>
+                <ToggleButton fx:id="favoritesToggleButton" text="★ Favorites Only" onAction="#onFavoritesToggle" style="-fx-font-size: 14; -fx-padding: 5 14; -fx-background-radius: 5; -fx-border-radius: 5; -fx-border-color: #bba500; -fx-border-width: 1; -fx-background-color: linear-gradient(to bottom,#fffbe6,#ffe066); -fx-effect: dropshadow(gaussian, #e6c200, 2,0,0,1);"/>
                 <Region HBox.hgrow="ALWAYS"/>
                 <ProgressIndicator fx:id="loadingIndicator" maxWidth="30" maxHeight="30" visible="false"/>
             </FlowPane>
@@ -55,6 +56,7 @@
     <center>
         <TableView fx:id="socketsTable" editable="false">
             <columns>
+                <TableColumn fx:id="favoriteColumn" text="★" prefWidth="40"/>
                 <TableColumn fx:id="protocolColumn" text="Protocol" prefWidth="70"/>
                 <TableColumn fx:id="stateColumn" text="State" prefWidth="100"/>
                 <TableColumn fx:id="localAddressColumn" text="Local Address" prefWidth="150"/>

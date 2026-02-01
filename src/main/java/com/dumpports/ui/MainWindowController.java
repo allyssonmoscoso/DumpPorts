@@ -42,6 +42,14 @@ import javafx.stage.FileChooser;
 import javafx.stage.Window;
 
 public class MainWindowController implements Initializable {
+                    @FXML
+                    private javafx.scene.control.ToggleButton favoritesToggleButton;
+                // Set of favorite composite keys (persisted)
+                private java.util.Set<String> favoriteKeys = new java.util.HashSet<>();
+                private static final String FAVORITES_PREF_KEY = "favoriteSockets";
+                private boolean filterFavorites = false;
+            @FXML
+            private TableColumn<Socket, Boolean> favoriteColumn;
         /**
          * Normalize a string: NFKD, lower, remove diacritics and special characters except alphanum and space.
          */
@@ -135,6 +143,113 @@ public class MainWindowController implements Initializable {
         setupAdvancedFilterControls();
             loadSocketData();
             setupSearchHighlighting();
+        setupFavoriteColumn();
+        loadFavoritesFromPrefs();
+
+        if (favoritesToggleButton != null) {
+            favoritesToggleButton.setSelected(false);
+            favoritesToggleButton.selectedProperty().addListener((obs, oldVal, newVal) -> {
+                filterFavorites = newVal;
+                filterSockets();
+                updateFavoritesToggleStyle();
+            });
+            updateFavoritesToggleStyle();
+        }
+    }
+        @FXML
+        private void onFavoritesToggle() {
+            if (favoritesToggleButton != null) {
+                filterFavorites = favoritesToggleButton.isSelected();
+                filterSockets();
+                updateFavoritesToggleStyle();
+            }
+        }
+
+        private void updateFavoritesToggleStyle() {
+            if (favoritesToggleButton != null) {
+                if (favoritesToggleButton.isSelected()) {
+                    favoritesToggleButton.setStyle("-fx-background-color: gold; -fx-font-size: 14; -fx-padding: 5 10;");
+                } else {
+                    favoritesToggleButton.setStyle("-fx-background-color: #f0f0f0; -fx-font-size: 14; -fx-padding: 5 10;");
+                }
+            }
+        }
+    /**
+     * Sets up the favorite/star column with a toggleable icon and click handler.
+     */
+    private void setupFavoriteColumn() {
+        favoriteColumn.setCellValueFactory(cellData -> new javafx.beans.property.SimpleBooleanProperty(cellData.getValue().isFavorite()));
+        favoriteColumn.setCellFactory(col -> new javafx.scene.control.TableCell<Socket, Boolean>() {
+            private final javafx.scene.control.Label star = new javafx.scene.control.Label();
+            {
+                star.setStyle("-fx-font-size: 18; -fx-cursor: hand;");
+                setGraphic(star);
+                setContentDisplay(javafx.scene.control.ContentDisplay.GRAPHIC_ONLY);
+                star.setOnMouseClicked(event -> {
+                    Socket socket = getTableView().getItems().get(getIndex());
+                    boolean newFav = !socket.isFavorite();
+                    socket.setFavorite(newFav);
+                    updateFavoritePrefs(socket, newFav);
+                    getTableView().refresh();
+                });
+            }
+            @Override
+            protected void updateItem(Boolean fav, boolean empty) {
+                super.updateItem(fav, empty);
+                if (empty || getTableRow() == null || getIndex() >= getTableView().getItems().size()) {
+                    setGraphic(null);
+                } else {
+                    Socket socket = getTableView().getItems().get(getIndex());
+                    boolean isFav = socket.isFavorite();
+                    star.setText(isFav ? "★" : "☆");
+                    setGraphic(star);
+                    if (socket.getExecutablePath() == null || socket.getExecutablePath().isEmpty()) {
+                        star.setTooltip(new javafx.scene.control.Tooltip("Warning: Favorite may not be unique (missing executable path)."));
+                    } else {
+                        star.setTooltip(null);
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Loads favorite keys from Preferences and updates sockets in the table.
+     */
+    private void loadFavoritesFromPrefs() {
+        favoriteKeys.clear();
+        String favs = prefs.get(FAVORITES_PREF_KEY, "");
+        if (!favs.isEmpty()) {
+            for (String key : favs.split(",")) {
+                if (!key.isEmpty()) favoriteKeys.add(key);
+            }
+        }
+        // Mark favorites in allSocketsData
+        for (Socket s : allSocketsData) {
+            s.setFavorite(favoriteKeys.contains(s.getCompositeKey()));
+        }
+        socketsTable.refresh();
+    }
+
+    /**
+     * Updates the favorite keys set and persists it.
+     */
+    private void updateFavoritePrefs(Socket socket, boolean isFav) {
+        String key = socket.getCompositeKey();
+        if (isFav) {
+            favoriteKeys.add(key);
+        } else {
+            favoriteKeys.remove(key);
+        }
+        prefs.put(FAVORITES_PREF_KEY, String.join(",", favoriteKeys));
+    }
+
+    /**
+     * Toggle filtering to show only favorites.
+     */
+    public void toggleFavoriteFilter() {
+        filterFavorites = !filterFavorites;
+        filterSockets();
     }
 
         /**
@@ -466,6 +581,7 @@ public class MainWindowController implements Initializable {
         }
 
         List<Socket> filtered = allSocketsData.stream()
+            .filter(socket -> !filterFavorites || socket.isFavorite())
             .filter(socket -> {
                 // Protocol filter
                 if (!"All".equals(selectedProtocol) && selectedProtocol != null && !socket.getProtocol().equalsIgnoreCase(selectedProtocol))

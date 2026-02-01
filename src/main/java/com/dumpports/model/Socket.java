@@ -6,6 +6,39 @@ package com.dumpports.model;
  */
 public class Socket {
 
+    // Favorite/bookmark property (not persisted in data, only for UI/session)
+    private boolean favorite = false;
+    /**
+     * Returns a composite key for this socket, used for favorites/bookmarks.
+     * Format: protocol|localAddress|localPort|remoteAddress|remotePort|process|executablePath
+     * If executablePath is null/empty, process is used and a warning should be shown in UI.
+     */
+    public String getCompositeKey() {
+        String proc = (process == null) ? "" : process;
+        String exe = (executablePath == null) ? "" : executablePath;
+        return String.join("|",
+            safe(protocol),
+            safe(localAddress),
+            safe(localPort),
+            safe(remoteAddress),
+            safe(remotePort),
+            proc,
+            exe
+        );
+    }
+
+    private String safe(String s) {
+        return s == null ? "" : s;
+    }
+
+    public boolean isFavorite() {
+        return favorite;
+    }
+
+    public void setFavorite(boolean favorite) {
+        this.favorite = favorite;
+    }
+
     private String netns;
     private String protocol;
     private String state;
