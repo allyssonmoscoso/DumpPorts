@@ -2,11 +2,13 @@
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.*?>
 <?import javafx.scene.layout.*?>
+<?import javafx.collections.FXCollections?>
+<?import java.lang.String?>
 
 <BorderPane xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.dumpports.ui.MainWindowController">
     <top>
         <VBox spacing="10" style="-fx-padding: 10;">
-            <HBox spacing="10" alignment="CENTER_LEFT">
+            <FlowPane hgap="10" vgap="10" alignment="CENTER_LEFT" prefWrapLength="900" style="-fx-padding: 0 0 10 0;">
                 <Label text="Protocol Filter:" style="-fx-font-size: 12;"/>
                 <ComboBox fx:id="protocolFilterCombo" prefWidth="120"/>
                 <Button fx:id="refreshButton" text="Refresh" style="-fx-padding: 5 15;"/>
@@ -16,11 +18,32 @@
                     <Spinner fx:id="refreshIntervalSpinner" editable="true"/>
                 </HBox>
                 <Separator orientation="VERTICAL"/>
+                <Label text="Port Range:"/>
+                <TextField fx:id="minPortField" promptText="Min" prefWidth="50"/>
+                <TextField fx:id="maxPortField" promptText="Max" prefWidth="50"/>
+                <ComboBox fx:id="portTypeCombo" prefWidth="90">
+                    <items>
+                        <FXCollections fx:factory="observableArrayList">
+                            <String fx:value="Local"/>
+                            <String fx:value="Remote"/>
+                            <String fx:value="Both"/>
+                        </FXCollections>
+                    </items>
+                </ComboBox>
+                <Separator orientation="VERTICAL"/>
+                    <HBox spacing="5" alignment="CENTER_LEFT">
+                        <Label text="Address Regex:"/>
+                        <TextField fx:id="addressRegexField" promptText="e.g. ^192\\.168\\..*" prefWidth="140"/>
+                    </HBox>
+                <CheckBox fx:id="localAddressCheck" text="Local" selected="true"/>
+                <CheckBox fx:id="remoteAddressCheck" text="Remote" selected="true"/>
+                <Label fx:id="regexWarningLabel" text="" style="-fx-text-fill: red; -fx-font-size: 11;" visible="false"/>
+                <Separator orientation="VERTICAL"/>
                 <Button fx:id="exportCSVButton" text="Export to CSV" style="-fx-padding: 5 15;"/>
                 <Button fx:id="exportJSONButton" text="Export to JSON" style="-fx-padding: 5 15;"/>
                 <Region HBox.hgrow="ALWAYS"/>
                 <ProgressIndicator fx:id="loadingIndicator" maxWidth="30" maxHeight="30" visible="false"/>
-            </HBox>
+            </FlowPane>
             <Label fx:id="statusLabel" text="Ready" style="-fx-text-fill: #666666; -fx-font-size: 11;"/>
         </VBox>
     </top>

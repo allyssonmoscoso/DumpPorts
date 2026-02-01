@@ -1,5 +1,5 @@
-package com.dumpports.ui;
 
+package com.dumpports.ui;
 import java.io.File;
 import java.net.URL;
 import java.util.ArrayList;
@@ -10,6 +10,9 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.prefs.Preferences;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +36,7 @@ import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
+import javafx.scene.control.TextField;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.stage.FileChooser;
 import javafx.stage.Window;
@@ -83,6 +87,18 @@ public class MainWindowController implements Initializable {
     @FXML
     private ProgressIndicator loadingIndicator;
 
+    // Advanced filter controls
+    @FXML private TextField minPortField;
+    @FXML private TextField maxPortField;
+    @FXML private ComboBox<String> portTypeCombo;
+    @FXML private TextField addressRegexField;
+    @FXML private CheckBox localAddressCheck;
+    @FXML private CheckBox remoteAddressCheck;
+    @FXML private Label regexWarningLabel;
+
+    // Preferences for persistence
+    private final Preferences prefs = Preferences.userNodeForPackage(MainWindowController.class);
+
     private final SocketStatisticsService socketService = new SocketStatisticsService();
     private final ExportService exportService = new ExportService();
     private ObservableList<Socket> socketsList = FXCollections.observableArrayList();
@@ -101,7 +117,37 @@ public class MainWindowController implements Initializable {
         setupRefreshButton();
         setupExportButtons();
         setupAutoRefreshControls();
+        setupAdvancedFilterControls();
         loadSocketData();
+    }
+
+    private void setupAdvancedFilterControls() {
+        // Restore persisted filter values
+        minPortField.setText(prefs.get("minPort", ""));
+        maxPortField.setText(prefs.get("maxPort", ""));
+        portTypeCombo.setValue(prefs.get("portType", "Both"));
+        addressRegexField.setText(prefs.get("addressRegex", ""));
+        localAddressCheck.setSelected(prefs.getBoolean("localAddressCheck", true));
+        remoteAddressCheck.setSelected(prefs.getBoolean("remoteAddressCheck", true));
+        regexWarningLabel.setVisible(false);
+
+        // Listeners for persistence and filtering
+        minPortField.textProperty().addListener((obs, o, n) -> saveAndFilter());
+        maxPortField.textProperty().addListener((obs, o, n) -> saveAndFilter());
+        portTypeCombo.valueProperty().addListener((obs, o, n) -> saveAndFilter());
+        addressRegexField.textProperty().addListener((obs, o, n) -> saveAndFilter());
+        localAddressCheck.selectedProperty().addListener((obs, o, n) -> saveAndFilter());
+        remoteAddressCheck.selectedProperty().addListener((obs, o, n) -> saveAndFilter());
+    }
+
+    private void saveAndFilter() {
+        prefs.put("minPort", minPortField.getText());
+        prefs.put("maxPort", maxPortField.getText());
+        prefs.put("portType", portTypeCombo.getValue() == null ? "Both" : portTypeCombo.getValue());
+        prefs.put("addressRegex", addressRegexField.getText());
+        prefs.putBoolean("localAddressCheck", localAddressCheck.isSelected());
+        prefs.putBoolean("remoteAddressCheck", remoteAddressCheck.isSelected());
+        filterSockets();
     }
 
     private void setupAutoRefreshControls() {
@@ -305,20 +351,92 @@ public class MainWindowController implements Initializable {
 
     @FXML
     private void filterSockets() {
-        String selectedProtocol = protocolFilterCombo.getValue();
-        
-        if ("All".equals(selectedProtocol)) {
-            socketsList.clear();
-            socketsList.addAll(allSocketsData);
-            statusLabel.setText("Loaded " + allSocketsData.size() + " sockets");
+        final String selectedProtocol = protocolFilterCombo.getValue();
+        final String minPortStr = minPortField.getText().trim();
+        final String maxPortStr = maxPortField.getText().trim();
+        final String portType = portTypeCombo.getValue() == null ? "Both" : portTypeCombo.getValue();
+        final String regex = addressRegexField.getText().trim();
+        final boolean filterLocal = localAddressCheck.isSelected();
+        final boolean filterRemote = remoteAddressCheck.isSelected();
+
+        final Integer minPort;
+        if (!minPortStr.isEmpty()) {
+            Integer temp = null;
+            try { temp = Integer.parseInt(minPortStr); } catch (NumberFormatException ignored) {}
+            minPort = temp;
         } else {
-            List<Socket> filtered = allSocketsData.stream()
-                    .filter(socket -> socket.getProtocol().equalsIgnoreCase(selectedProtocol))
-                    .toList();
-            socketsList.clear();
-            socketsList.addAll(filtered);
-            statusLabel.setText("Filtered to " + selectedProtocol.toUpperCase() + 
-                    ": " + filtered.size() + " sockets");
+            minPort = null;
+        }
+        final Integer maxPort;
+        if (!maxPortStr.isEmpty()) {
+            Integer temp = null;
+            try { temp = Integer.parseInt(maxPortStr); } catch (NumberFormatException ignored) {}
+            maxPort = temp;
+        } else {
+            maxPort = null;
+        }
+
+        final Pattern addressPattern;
+        final boolean regexValid;
+        if (!regex.isEmpty() && (filterLocal || filterRemote)) {
+            Pattern tempPattern = null;
+            boolean valid = true;
+            try {
+                tempPattern = Pattern.compile(regex);
+                regexWarningLabel.setVisible(false);
+            } catch (PatternSyntaxException e) {
+                valid = false;
+                regexWarningLabel.setText("Invalid regex pattern");
+                regexWarningLabel.setVisible(true);
+            }
+            addressPattern = tempPattern;
+            regexValid = valid;
+        } else {
+            addressPattern = null;
+            regexValid = true;
+            regexWarningLabel.setVisible(false);
+        }
+
+        List<Socket> filtered = allSocketsData.stream()
+            .filter(socket -> {
+                // Protocol filter
+                if (!"All".equals(selectedProtocol) && selectedProtocol != null && !socket.getProtocol().equalsIgnoreCase(selectedProtocol))
+                    return false;
+                // Port range filter
+                if (minPort != null || maxPort != null) {
+                    boolean match = false;
+                    if (portType.equals("Local")) {
+                        match = portInRange(socket.getLocalPort(), minPort, maxPort);
+                    } else if (portType.equals("Remote")) {
+                        match = portInRange(socket.getRemotePort(), minPort, maxPort);
+                    } else if (portType.equals("Both")) {
+                        match = portInRange(socket.getLocalPort(), minPort, maxPort) || portInRange(socket.getRemotePort(), minPort, maxPort);
+                    }
+                    if (!match) return false;
+                }
+                // Address regex filter (only if valid)
+                if (regexValid && addressPattern != null) {
+                    boolean localOk = !filterLocal || (socket.getLocalAddress() != null && addressPattern.matcher(socket.getLocalAddress()).find());
+                    boolean remoteOk = !filterRemote || (socket.getRemoteAddress() != null && addressPattern.matcher(socket.getRemoteAddress()).find());
+                    if (!(localOk || remoteOk)) return false;
+                }
+                return true;
+            })
+            .toList();
+        socketsList.clear();
+        socketsList.addAll(filtered);
+        statusLabel.setText("Filtered: " + filtered.size() + " sockets");
+    }
+
+    private boolean portInRange(String portStr, Integer min, Integer max) {
+        if (portStr == null || portStr.isEmpty()) return false;
+        try {
+            int port = Integer.parseInt(portStr);
+            if (min != null && port < min) return false;
+            if (max != null && port > max) return false;
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
         }
     }
 
