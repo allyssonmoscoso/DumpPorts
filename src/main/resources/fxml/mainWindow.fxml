@@ -18,6 +18,10 @@
                     <Spinner fx:id="refreshIntervalSpinner" editable="true"/>
                 </HBox>
                 <Separator orientation="VERTICAL"/>
+                <HBox spacing="5" alignment="CENTER_LEFT">
+                    <Label text="Search:"/>
+                    <TextField fx:id="searchField" promptText="Type to search..." prefWidth="160"/>
+                </HBox>
                 <Label text="Port Range:"/>
                 <TextField fx:id="minPortField" promptText="Min" prefWidth="50"/>
                 <TextField fx:id="maxPortField" promptText="Max" prefWidth="50"/>

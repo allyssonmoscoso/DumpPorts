@@ -1,5 +1,5 @@
-
 package com.dumpports.ui;
+
 import java.io.File;
 import java.net.URL;
 import java.util.ArrayList;
@@ -41,12 +41,25 @@ import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.stage.FileChooser;
 import javafx.stage.Window;
 
-/**
- * Controller for the main window of the DumpPorts application.
- * Manages the UI interactions and coordination between services and views.
- */
 public class MainWindowController implements Initializable {
+        /**
+         * Normalize a string: NFKD, lower, remove diacritics and special characters except alphanum and space.
+         */
+        private String normalize(String input) {
+            if (input == null) return "";
+            String norm = java.text.Normalizer.normalize(input, java.text.Normalizer.Form.NFKD)
+                .replaceAll("\\p{M}", ""); // Remove diacritics
+            norm = norm.replaceAll("[^\\p{Alnum} ]", ""); // Remove special chars except alphanum and space
+            return norm.toLowerCase();
+        }
 
+        /**
+         * Checks if the normalized field contains the normalized search string.
+         */
+        private boolean containsNormalized(String field, String search) {
+            if (field == null) return false;
+            return normalize(field).contains(search);
+        }
     private static final Logger logger = LoggerFactory.getLogger(MainWindowController.class);
 
     // Map to store previous socket states for monitoring
@@ -84,10 +97,12 @@ public class MainWindowController implements Initializable {
     private Button exportJSONButton;
     @FXML
     private Label statusLabel;
+    // ...rest of fields, methods, and logic...
     @FXML
     private ProgressIndicator loadingIndicator;
 
     // Advanced filter controls
+    @FXML private TextField searchField;
     @FXML private TextField minPortField;
     @FXML private TextField maxPortField;
     @FXML private ComboBox<String> portTypeCombo;
@@ -118,9 +133,55 @@ public class MainWindowController implements Initializable {
         setupExportButtons();
         setupAutoRefreshControls();
         setupAdvancedFilterControls();
-        loadSocketData();
+            loadSocketData();
+            setupSearchHighlighting();
     }
 
+        /**
+         * Sets up custom cell factories for all relevant table columns to highlight search matches.
+         * Uses a subtle background color for matched text, ignoring diacritics and special characters.
+         */
+        private void setupSearchHighlighting() {
+            javafx.scene.paint.Color highlightColor = javafx.scene.paint.Color.web("#FFFACD"); // LemonChiffon (subtle)
+            String searchText = normalize(searchField.getText());
+
+            // Helper to create cell factory for highlighting
+            java.util.function.Function<javafx.util.Callback<TableColumn<Socket, String>, javafx.scene.control.TableCell<Socket, String>>, javafx.util.Callback<TableColumn<Socket, String>, javafx.scene.control.TableCell<Socket, String>>> highlighter = baseFactory -> col -> {
+                return new javafx.scene.control.TableCell<Socket, String>() {
+                    @Override
+                    protected void updateItem(String item, boolean empty) {
+                        super.updateItem(item, empty);
+                        if (empty || item == null) {
+                            setText(null);
+                            setStyle("");
+                        } else {
+                            setText(item);
+                            String normalizedItem = normalize(item);
+                            String normalizedSearch = normalize(searchField.getText());
+                            if (!normalizedSearch.isEmpty() && containsNormalized(normalizedItem, normalizedSearch)) {
+                                setStyle("-fx-background-color: #FFFACD;");
+                            } else {
+                                setStyle("");
+                            }
+                        }
+                    }
+                };
+            };
+
+            // Apply to all relevant columns
+            protocolColumn.setCellFactory(highlighter.apply(protocolColumn.getCellFactory()));
+            stateColumn.setCellFactory(highlighter.apply(stateColumn.getCellFactory()));
+            localAddressColumn.setCellFactory(highlighter.apply(localAddressColumn.getCellFactory()));
+            localPortColumn.setCellFactory(highlighter.apply(localPortColumn.getCellFactory()));
+            remoteAddressColumn.setCellFactory(highlighter.apply(remoteAddressColumn.getCellFactory()));
+            remotePortColumn.setCellFactory(highlighter.apply(remotePortColumn.getCellFactory()));
+            processColumn.setCellFactory(highlighter.apply(processColumn.getCellFactory()));
+
+            // Update highlighting on search text change
+            searchField.textProperty().addListener((obs, oldVal, newVal) -> {
+                socketsTable.refresh();
+            });
+        }
     private void setupAdvancedFilterControls() {
         // Restore persisted filter values
         minPortField.setText(prefs.get("minPort", ""));
@@ -130,6 +191,7 @@ public class MainWindowController implements Initializable {
         localAddressCheck.setSelected(prefs.getBoolean("localAddressCheck", true));
         remoteAddressCheck.setSelected(prefs.getBoolean("remoteAddressCheck", true));
         regexWarningLabel.setVisible(false);
+        searchField.setText(prefs.get("searchText", ""));
 
         // Listeners for persistence and filtering
         minPortField.textProperty().addListener((obs, o, n) -> saveAndFilter());
@@ -138,6 +200,10 @@ public class MainWindowController implements Initializable {
         addressRegexField.textProperty().addListener((obs, o, n) -> saveAndFilter());
         localAddressCheck.selectedProperty().addListener((obs, o, n) -> saveAndFilter());
         remoteAddressCheck.selectedProperty().addListener((obs, o, n) -> saveAndFilter());
+        searchField.textProperty().addListener((obs, o, n) -> {
+            prefs.put("searchText", n);
+            filterSockets();
+        });
     }
 
     private void saveAndFilter() {
@@ -351,6 +417,8 @@ public class MainWindowController implements Initializable {
 
     @FXML
     private void filterSockets() {
+            final String searchTextRaw = searchField.getText().trim();
+            final String searchText = normalize(searchTextRaw);
         final String selectedProtocol = protocolFilterCombo.getValue();
         final String minPortStr = minPortField.getText().trim();
         final String maxPortStr = maxPortField.getText().trim();
@@ -419,6 +487,19 @@ public class MainWindowController implements Initializable {
                     boolean localOk = !filterLocal || (socket.getLocalAddress() != null && addressPattern.matcher(socket.getLocalAddress()).find());
                     boolean remoteOk = !filterRemote || (socket.getRemoteAddress() != null && addressPattern.matcher(socket.getRemoteAddress()).find());
                     if (!(localOk || remoteOk)) return false;
+                }
+                // Search filter (match any field, ignore diacritics/specials)
+                if (!searchText.isEmpty()) {
+                    boolean found = false;
+                    found |= containsNormalized(socket.getProtocol(), searchText);
+                    found |= containsNormalized(socket.getState(), searchText);
+                    found |= containsNormalized(socket.getLocalAddress(), searchText);
+                    found |= containsNormalized(socket.getLocalPort(), searchText);
+                    found |= containsNormalized(socket.getRemoteAddress(), searchText);
+                    found |= containsNormalized(socket.getRemotePort(), searchText);
+                    found |= containsNormalized(socket.getProcess(), searchText);
+                    found |= containsNormalized(socket.getExecutablePath(), searchText);
+                    if (!found) return false;
                 }
                 return true;
             })
