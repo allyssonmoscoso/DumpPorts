@@ -45,6 +45,11 @@ public class MainWindowController implements Initializable {
 
     private static final Logger logger = LoggerFactory.getLogger(MainWindowController.class);
 
+    // Map to store previous socket states for monitoring
+    private final java.util.Map<String, String> previousSocketStates = new java.util.HashMap<>();
+    // List to store detected state transitions (for future UI/log display)
+    private final List<String> stateTransitions = new ArrayList<>();
+
     @FXML
     private TableView<Socket> socketsTable;
     @FXML
@@ -243,6 +248,59 @@ public class MainWindowController implements Initializable {
         
         loadThread.setDaemon(true);
         loadThread.start();
+    }
+
+    /**
+     * Detects socket state transitions and logs them.
+     * @param currentSockets List of current sockets
+     */
+    private void detectSocketStateTransitions(List<Socket> currentSockets) {
+        java.util.Map<String, String> newStates = new java.util.HashMap<>();
+        List<String> transitions = new ArrayList<>();
+        for (Socket socket : currentSockets) {
+            String key = buildSocketKey(socket);
+            String newState = socket.getState();
+            newStates.put(key, newState);
+            String oldState = previousSocketStates.get(key);
+            if (oldState != null && !oldState.equals(newState)) {
+                String transition = String.format("Socket [%s] state changed: %s -> %s", key, oldState, newState);
+                transitions.add(transition);
+                logger.info(transition);
+            }
+        }
+        // Optionally, detect closed sockets (present before, missing now)
+        for (String key : previousSocketStates.keySet()) {
+            if (!newStates.containsKey(key)) {
+                String transition = String.format("Socket [%s] closed (was %s)", key, previousSocketStates.get(key));
+                transitions.add(transition);
+                logger.info(transition);
+            }
+        }
+        previousSocketStates.clear();
+        previousSocketStates.putAll(newStates);
+        // Store transitions for possible UI display
+        synchronized (stateTransitions) {
+            stateTransitions.clear();
+            stateTransitions.addAll(transitions);
+        }
+    }
+
+    /**
+     * Builds a unique key for a socket based on protocol, local/remote address/port, and pid.
+     */
+    private String buildSocketKey(Socket socket) {
+        return String.join(":",
+                safe(socket.getProtocol()),
+                safe(socket.getLocalAddress()),
+                safe(socket.getLocalPort()),
+                safe(socket.getRemoteAddress()),
+                safe(socket.getRemotePort()),
+                safe(socket.getPid())
+        );
+    }
+
+    private String safe(String s) {
+        return s == null ? "" : s;
     }
 
     @FXML
