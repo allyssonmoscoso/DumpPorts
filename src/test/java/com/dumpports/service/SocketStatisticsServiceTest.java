@@ -1,7 +1,9 @@
 package com.dumpports.service;
 
 import java.util.List;
+import java.util.Map;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import org.junit.Before;
@@ -65,8 +67,23 @@ public class SocketStatisticsServiceTest {
             assertTrue("Socket protocol should be udp", 
                     socket.getProtocol().equalsIgnoreCase("udp"));
         }
-        
+
         System.out.println("TCP sockets: " + tcpSockets.size());
         System.out.println("UDP sockets: " + udpSockets.size());
+    }
+
+    @Test
+    public void testParseSocketLineUsesProvidedExecutablePath() {
+        String line = "tcp ESTAB 0 0 127.0.0.1:8080 127.0.0.1:5000 users:((\"java\",pid=123,fd=5))";
+
+        Socket socket = service.parseSocketLine(line, Map.of("123", "/opt/app/bin/java"));
+
+        assertNotNull("Socket should be parsed", socket);
+        assertEquals("tcp", socket.getProtocol());
+        assertEquals("8080", socket.getLocalPort());
+        assertEquals("5000", socket.getRemotePort());
+        assertEquals("java", socket.getProcess());
+        assertEquals("123", socket.getPid());
+        assertEquals("/opt/app/bin/java", socket.getExecutablePath());
     }
 }

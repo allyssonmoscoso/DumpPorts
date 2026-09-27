@@ -11,6 +11,7 @@ A "modern", visual tool to read and display network socket statistics using sock
 - Automatic data refresh capability
 - Export functionality (CSV and JSON formats)
 - Clean and intuitive user interface
+- Optional root mode for full visibility of all users' processes (PolicyKit)
 - Cross-platform compatibility (Linux, Windows with WSL)
 
 ## Requirements
@@ -19,6 +20,7 @@ A "modern", visual tool to read and display network socket statistics using sock
 - Maven 3.6 or higher
 - Linux/Unix system with `ss` command available
 - JavaFX
+- PolicyKit (`pkexec`) and a running authentication agent for root mode
 
 ## Building the Project
 
@@ -34,6 +36,18 @@ mvn clean package
 mvn javafx:run
 ```
 
+> **JDK 25 required.** The project targets Java 25 and JavaFX 25, so Maven must
+> run on a JDK 25 (or newer). If Maven is using an older JDK you will see an
+> error like `Unsupported major.minor version 67.0`. Set `JAVA_HOME` to a
+> JDK 25 installation before running Maven:
+>
+> ```bash
+> export JAVA_HOME=/path/to/jdk-25
+> mvn javafx:run
+> ```
+>
+> The build fails fast with a clear message when the JDK is too old.
+
 ### Using JAR
 
 ```bash
@@ -47,6 +61,24 @@ java -jar target/dumpports-{version}.jar
 1. Launch the application
 2. Click the **Refresh** button to load current socket statistics
 3. The table will display all network sockets with detailed information
+
+### Root Mode
+
+By default the app runs in **User Mode** and can only resolve process names for
+your own sockets. On startup (and at any time through the **Run as Root**
+button) DumpPorts can request root privileges so that processes of every user
+are visible.
+
+1. On startup, confirm the "Run DumpPorts with root privileges?" dialog
+2. Authenticate with your system password in the PolicyKit (`pkexec`) prompt
+3. The mode label switches to **Root Mode** and socket queries now show all
+   processes, including their executable paths
+
+A single privileged helper is started once and kept alive, so auto-refresh does
+not ask for the password again. If you decline or authentication fails, the app
+stays in **User Mode**, the mode label shows this, and the **Run as Root**
+button remains available to try again later. If PolicyKit is not available the
+app simply runs in User Mode.
 
 ### Real-time Auto Refresh
 
