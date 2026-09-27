@@ -16,6 +16,11 @@
             </MenuBar>
             <VBox spacing="10" style="-fx-padding: 10;">
                 <Label fx:id="historyWarningLabel" text="" style="-fx-text-fill: orange; -fx-font-size: 11;" visible="false"/>
+                <HBox spacing="8" alignment="CENTER_LEFT">
+                    <Label fx:id="privilegeModeLabel" text="🔒 User Mode" style="-fx-text-fill: #b8860b; -fx-font-size: 12; -fx-font-weight: bold;"/>
+                    <Button fx:id="elevateButton" text="Run as Root" style="-fx-padding: 3 12;"/>
+                    <ProgressIndicator fx:id="elevationIndicator" maxWidth="18" maxHeight="18" visible="false" managed="false"/>
+                </HBox>
                 <FlowPane hgap="10" vgap="10" alignment="CENTER_LEFT" prefWrapLength="900" style="-fx-padding: 0 0 10 0;">
                     <Label text="Protocol Filter:" style="-fx-font-size: 12;"/>
                     <ComboBox fx:id="protocolFilterCombo" prefWidth="120"/>

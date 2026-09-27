@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,50 +17,98 @@ import com.dumpports.model.Socket;
 /**
  * Service class for reading socket statistics from the system using the 'ss' command.
  * Parses output and converts it into Socket objects.
+ *
+ * <p>Data can be retrieved directly (user mode) or through a privileged helper
+ * (root mode) managed by {@link PrivilegeManager}.</p>
  */
 public class SocketStatisticsService {
 
     private static final Logger logger = LoggerFactory.getLogger(SocketStatisticsService.class);
 
+    private final PrivilegeManager privilegeManager;
+
+    /**
+     * Creates a service in user mode. Kept for backwards compatibility and tests.
+     */
+    public SocketStatisticsService() {
+        this(new PrivilegeManager());
+    }
+
+    /**
+     * Creates a service bound to the given privilege manager.
+     *
+     * @param privilegeManager shared privilege state
+     */
+    public SocketStatisticsService(PrivilegeManager privilegeManager) {
+        this.privilegeManager = privilegeManager;
+    }
+
     /**
      * Executes the 'ss' command and retrieves all network sockets.
-     * Requires appropriate system permissions.
+     * When root mode is active the query is delegated to the privileged helper,
+     * otherwise it runs directly with the current user's permissions.
      *
      * @return List of Socket objects containing parsed statistics
      */
     public List<Socket> getSocketStatistics() {
+        List<String> lines;
+        Map<String, String> exeByPid;
+
+        PrivilegedSocketHelper helper = privilegeManager.getHelper();
+        if (helper != null) {
+            try {
+                PrivilegedSocketHelper.SocketData data = helper.dump();
+                lines = data.ssLines();
+                exeByPid = data.exeByPid();
+            } catch (Exception e) {
+                logger.error("Error retrieving socket statistics from privileged helper", e);
+                privilegeManager.reportHelperFailure();
+                lines = runLocalSs();
+                exeByPid = Map.of();
+            }
+        } else {
+            lines = runLocalSs();
+            exeByPid = Map.of();
+        }
+
         List<Socket> sockets = new ArrayList<>();
-        
+        for (String line : lines) {
+            Socket socket = parseSocketLine(line, exeByPid);
+            if (socket != null) {
+                sockets.add(socket);
+            }
+        }
+
+        logger.info("Retrieved {} socket statistics (root mode: {})", sockets.size(), privilegeManager.isRootMode());
+        return sockets;
+    }
+
+    /**
+     * Runs the local {@code ss} command with the current user's permissions.
+     *
+     * @return non-blank output lines, or an empty list on failure
+     */
+    private List<String> runLocalSs() {
+        List<String> lines = new ArrayList<>();
         try {
-            ProcessBuilder processBuilder = new ProcessBuilder("ss", "-tunap");
-            processBuilder.redirectErrorStream(true);
-            
+            ProcessBuilder processBuilder = new ProcessBuilder("ss", "-tunapH");
+            processBuilder.redirectError(ProcessBuilder.Redirect.DISCARD);
+
             Process process = processBuilder.start();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            
-            String line;
-            boolean headerSkipped = false;
-            
-            while ((line = reader.readLine()) != null) {
-                if (!headerSkipped) {
-                    headerSkipped = true;
-                    continue;
-                }
-                
-                Socket socket = parseSocketLine(line);
-                if (socket != null) {
-                    sockets.add(socket);
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (!line.isBlank()) {
+                        lines.add(line);
+                    }
                 }
             }
-            
             process.waitFor();
-            logger.info("Retrieved {} socket statistics", sockets.size());
-            
         } catch (Exception e) {
-            logger.error("Error retrieving socket statistics", e);
+            logger.error("Error retrieving local socket statistics", e);
         }
-        
-        return sockets;
+        return lines;
     }
 
     /**
@@ -80,9 +129,10 @@ public class SocketStatisticsService {
      * Format: Netid State Recv-Q Send-Q Local-Address:Port Peer-Address:Port Process
      *
      * @param line Raw output line from ss command
+     * @param exeByPid Optional map of PID to executable path (root mode)
      * @return Parsed Socket object or null if parsing fails
      */
-    private Socket parseSocketLine(String line) {
+    Socket parseSocketLine(String line, Map<String, String> exeByPid) {
         if (line == null || line.trim().isEmpty()) {
             return null;
         }
@@ -115,7 +165,7 @@ public class SocketStatisticsService {
             
             // Column 6: Process (optional)
             if (parts.length > 6 && !parts[6].isEmpty()) {
-                parseProcessInfo(parts[6], socket);
+                parseProcessInfo(parts[6], socket, exeByPid);
             }
 
             return socket;
@@ -181,12 +231,14 @@ public class SocketStatisticsService {
     /**
      * Parses process information from ss output.
      * Format: users:(("process_name",pid=1234,fd=5))
-     * Also attempts to resolve the full executable path from /proc/pid/exe
+     * The executable path is taken from the privileged helper when available,
+     * otherwise it is resolved locally from /proc/pid/exe.
      *
      * @param processField The process field from ss output
      * @param socket The socket object to update
+     * @param exeByPid Optional map of PID to executable path (root mode)
      */
-    private void parseProcessInfo(String processField, Socket socket) {
+    private void parseProcessInfo(String processField, Socket socket, Map<String, String> exeByPid) {
         try {
             // Extract process name from users:(("name",pid=123,fd=4))
             if (processField.contains("((\"")) {
@@ -209,9 +261,12 @@ public class SocketStatisticsService {
                 if (pidEnd > pidStart) {
                     pid = processField.substring(pidStart, pidEnd);
                     socket.setPid(pid);
-                    
-                    // Try to get the full executable path from /proc/pid/exe
-                    String execPath = getExecutablePath(pid);
+
+                    // Prefer the path resolved by the privileged helper.
+                    String execPath = exeByPid == null ? null : exeByPid.get(pid);
+                    if (execPath == null || execPath.isEmpty()) {
+                        execPath = getExecutablePath(pid);
+                    }
                     if (execPath != null && !execPath.isEmpty()) {
                         socket.setExecutablePath(execPath);
                     }

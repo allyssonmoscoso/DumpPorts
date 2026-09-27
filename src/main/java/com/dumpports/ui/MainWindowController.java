@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
 
 import com.dumpports.model.Socket;
 import com.dumpports.service.ExportService;
+import com.dumpports.service.PrivilegeManager;
 import com.dumpports.service.SocketStatisticsService;
 
 import javafx.application.Platform;
@@ -117,6 +118,12 @@ public class MainWindowController implements Initializable {
     // ...rest of fields, methods, and logic...
     @FXML
     private ProgressIndicator loadingIndicator;
+    @FXML
+    private Label privilegeModeLabel;
+    @FXML
+    private Button elevateButton;
+    @FXML
+    private ProgressIndicator elevationIndicator;
 
     // Advanced filter controls
     @FXML private TextField searchField;
@@ -131,11 +138,13 @@ public class MainWindowController implements Initializable {
     // Preferences for persistence
     private final Preferences prefs = Preferences.userNodeForPackage(MainWindowController.class);
 
-    private final SocketStatisticsService socketService = new SocketStatisticsService();
+    private final PrivilegeManager privilegeManager = new PrivilegeManager();
+    private final SocketStatisticsService socketService = new SocketStatisticsService(privilegeManager);
     private final ExportService exportService = new ExportService();
     private ObservableList<Socket> socketsList = FXCollections.observableArrayList();
     private ObservableList<Socket> allSocketsData = FXCollections.observableArrayList();
     private final AtomicBoolean isRefreshing = new AtomicBoolean(false);
+    private final AtomicBoolean isRequestingElevation = new AtomicBoolean(false);
     private ScheduledExecutorService scheduler;
     private ScheduledFuture<?> refreshTask;
     private int refreshIntervalSeconds = 10;
@@ -150,6 +159,7 @@ public class MainWindowController implements Initializable {
         setupExportButtons();
         setupAutoRefreshControls();
         setupAdvancedFilterControls();
+        setupPrivilegeControls();
         loadSocketData();
         setupSearchHighlighting();
         setupFavoriteColumn();
@@ -164,6 +174,132 @@ public class MainWindowController implements Initializable {
             });
             updateFavoritesToggleStyle();
         }
+    }
+
+    /**
+     * Wires the privilege mode controls (mode label and elevation button).
+     */
+    private void setupPrivilegeControls() {
+        updatePrivilegeUi();
+        if (elevateButton != null) {
+            elevateButton.setOnAction(event -> onElevateRequested());
+        }
+    }
+
+    /**
+     * Prompts the user to elevate to root mode when the application starts.
+     * Called by {@code DumpPortsApplication} once the main window is visible.
+     */
+    public void promptElevationOnStartup() {
+        if (privilegeManager.isRootMode()) {
+            updatePrivilegeUi();
+            statusLabel.setText("Running with root privileges");
+            return;
+        }
+        if (!privilegeManager.isPkexecAvailable()) {
+            updatePrivilegeUi();
+            statusLabel.setText("User mode (PolicyKit / pkexec not available)");
+            return;
+        }
+
+        boolean confirmed = showConfirmationDialog(
+                "Root Access",
+                "Run DumpPorts with root privileges?",
+                "Root mode allows DumpPorts to see the processes of every user.\n"
+                        + "You will be asked to authenticate with your system password.\n"
+                        + "If you decline, the app keeps running in user mode and you can elevate later.");
+        if (confirmed) {
+            requestElevation();
+        } else {
+            updatePrivilegeUi();
+        }
+    }
+
+    /**
+     * Handles the "Run as Root" button.
+     */
+    @FXML
+    private void onElevateRequested() {
+        boolean confirmed = showConfirmationDialog(
+                "Root Access",
+                "Run DumpPorts with root privileges?",
+                "You will be asked to authenticate with your system password.");
+        if (confirmed) {
+            requestElevation();
+        }
+    }
+
+    /**
+     * Requests root privileges on a background thread and updates the UI with
+     * the result. In root mode all socket queries are delegated to the
+     * privileged helper, so auto-refresh does not prompt again.
+     */
+    private void requestElevation() {
+        if (!isRequestingElevation.compareAndSet(false, true)) {
+            return;
+        }
+        if (elevationIndicator != null) {
+            elevationIndicator.setVisible(true);
+            elevationIndicator.setManaged(true);
+        }
+        if (elevateButton != null) {
+            elevateButton.setDisable(true);
+        }
+        statusLabel.setText("Requesting root privileges...");
+
+        Thread thread = new Thread(() -> {
+            boolean success = privilegeManager.requestRootMode();
+            Platform.runLater(() -> {
+                isRequestingElevation.set(false);
+                if (elevationIndicator != null) {
+                    elevationIndicator.setVisible(false);
+                    elevationIndicator.setManaged(false);
+                }
+                if (elevateButton != null) {
+                    elevateButton.setDisable(false);
+                }
+                updatePrivilegeUi();
+                if (success) {
+                    statusLabel.setText("Root mode enabled");
+                    logger.info("Root mode enabled by user");
+                    loadSocketData();
+                } else {
+                    statusLabel.setText("User mode");
+                    String error = privilegeManager.getLastError();
+                    showWarningAlert("Root Access Denied", "Continuing in user mode",
+                            error != null ? error : "Root privileges were not granted.");
+                }
+            });
+        }, "privilege-elevation-thread");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    /**
+     * Refreshes the privilege mode label and the visibility of the elevate button.
+     */
+    private void updatePrivilegeUi() {
+        if (privilegeModeLabel != null) {
+            if (privilegeManager.isRootMode()) {
+                privilegeModeLabel.setText("🔓 Root Mode");
+                privilegeModeLabel.setStyle("-fx-text-fill: #2e7d32; -fx-font-size: 12; -fx-font-weight: bold;");
+            } else {
+                privilegeModeLabel.setText("🔒 User Mode");
+                privilegeModeLabel.setStyle("-fx-text-fill: #b8860b; -fx-font-size: 12; -fx-font-weight: bold;");
+            }
+        }
+        if (elevateButton != null) {
+            boolean showButton = !privilegeManager.isRootMode();
+            elevateButton.setVisible(showButton);
+            elevateButton.setManaged(showButton);
+        }
+    }
+
+    /**
+     * Releases resources held by the privilege manager (stops the helper).
+     */
+    public void shutdown() {
+        privilegeManager.close();
     }
 
     /**
@@ -563,6 +699,7 @@ public class MainWindowController implements Initializable {
             return;
         }
 
+        final boolean wasRoot = privilegeManager.isRootMode();
         loadingIndicator.setVisible(true);
         statusLabel.setText("Loading socket statistics...");
 
@@ -590,6 +727,11 @@ public class MainWindowController implements Initializable {
                     loadingIndicator.setVisible(false);
                     logger.debug("Socket data loaded successfully");
                     isRefreshing.set(false);
+                    if (wasRoot && !privilegeManager.isRootMode()) {
+                        updatePrivilegeUi();
+                        showWarningAlert("Root Access Lost", "Falling back to user mode",
+                                privilegeManager.getLastError());
+                    }
                 });
             } catch (Exception e) {
                 logger.error("Error loading socket data", e);
@@ -598,6 +740,7 @@ public class MainWindowController implements Initializable {
                     loadingIndicator.setVisible(false);
                     showErrorAlert("Error", "Failed to load socket statistics", e.getMessage());
                     isRefreshing.set(false);
+                    updatePrivilegeUi();
                 });
             }
         });
